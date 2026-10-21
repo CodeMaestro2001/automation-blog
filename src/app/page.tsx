@@ -10,6 +10,7 @@ export default async function Home() {
       linkedIn={linkedIn ? { connected: true, name: linkedIn.name } : { connected: false, name: "" }}
       githubConfigured={Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY)}
       linkedInConfigured={Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET && process.env.LINKEDIN_REDIRECT_URI)}
+      portfolioUrl={process.env.PORTFOLIO_URL || ""}
     />
   );
 }

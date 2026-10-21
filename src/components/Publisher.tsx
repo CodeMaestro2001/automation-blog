@@ -18,11 +18,13 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { buildLinkedInCopy, buildPostUrl, LINKEDIN_MAX_CHARACTERS, slugify } from "@/lib/publishing";
 
 type Props = {
   linkedIn: { connected: boolean; name: string };
   githubConfigured: boolean;
   linkedInConfigured: boolean;
+  portfolioUrl: string;
 };
 
 type PublishResult = {
@@ -54,7 +56,7 @@ function deriveArticle(content: string) {
   return { title, body, excerpt };
 }
 
-export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedInConfigured }: Props) {
+export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedInConfigured, portfolioUrl }: Props) {
   const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [publishWebsite, setPublishWebsite] = useState(true);
@@ -156,6 +158,13 @@ export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedI
   }
 
   const article = useMemo(() => deriveArticle(draft.content), [draft.content]);
+  const articleSlug = useMemo(() => slugify(article.title) || (article.title ? "post-0000000000000" : ""), [article.title]);
+  const articleUrl = useMemo(() => buildPostUrl(portfolioUrl, articleSlug), [articleSlug, portfolioUrl]);
+  const linkedInCopy = useMemo(() => buildLinkedInCopy(draft.content, articleUrl), [articleUrl, draft.content]);
+  const linkedInCharacterCount = linkedInCopy.length;
+  const articleLinkCharacters = Math.max(0, linkedInCharacterCount - draft.content.trim().length);
+  const linkedInOverLimit = linkedInCharacterCount > LINKEDIN_MAX_CHARACTERS;
+  const linkedInCharactersRemaining = Math.abs(LINKEDIN_MAX_CHARACTERS - linkedInCharacterCount);
   const paragraphs = useMemo(() => article.body.split(/\n\s*\n/).filter(Boolean), [article.body]);
   const tagList = draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
 
@@ -178,7 +187,14 @@ export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedI
 
           <section className="form-section">
             <div className="section-title"><div><h2>LinkedIn edition</h2><p>Write once for both destinations. The first non-empty line becomes the article title and URL automatically.</p></div></div>
-            <div className="field"><label htmlFor="content">Post copy &amp; article</label><textarea id="content" className="article-input" value={draft.content} onChange={(event) => update("content", event.target.value)} placeholder={"How Do Database Indexes Make SQL Queries Faster?\n\nWrite the complete post here…\n\nUse ## for headings and - for lists."} required maxLength={3000} /><span className="counter">{draft.content.length}/3000</span></div>
+            <div className="field">
+              <label htmlFor="content">Post copy &amp; article</label>
+              <textarea id="content" className="article-input" value={draft.content} onChange={(event) => update("content", event.target.value)} placeholder={"How Do Database Indexes Make SQL Queries Faster?\n\nWrite the complete post here…\n\nUse ## for headings and - for lists."} required aria-describedby="linkedin-character-count" aria-invalid={publishLinkedIn && linkedInOverLimit} />
+              <div id="linkedin-character-count" className={`counter-row ${linkedInOverLimit ? "counter-over" : ""}`} aria-live="polite">
+                <span>{articleLinkCharacters > 0 ? `Includes ${articleLinkCharacters} characters for the article link` : "Article-link length will be included automatically"}</span>
+                <strong>LinkedIn total: {linkedInCharacterCount.toLocaleString("en-US")}/{LINKEDIN_MAX_CHARACTERS.toLocaleString("en-US")} · {linkedInCharactersRemaining.toLocaleString("en-US")} {linkedInOverLimit ? "over" : "left"}</strong>
+              </div>
+            </div>
             <div className="two-fields">
               <div className="field"><label htmlFor="tags">Tags</label><input id="tags" value={draft.tags} onChange={(event) => update("tags", event.target.value)} placeholder="automation, engineering, AI" /><small>Separate with commas</small></div>
               <div className="field"><label htmlFor="imageAlt">Image description</label><input id="imageAlt" value={draft.imageAlt} onChange={(event) => update("imageAlt", event.target.value)} placeholder="Describe the image for accessibility" /></div>
@@ -217,7 +233,7 @@ export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedI
 
           <div className="publish-bar">
             <button type="button" className="clear-button" onClick={clearDraft}>Clear draft</button>
-            <button type="submit" className="publish-button" disabled={publishing || (!publishWebsite && !publishLinkedIn) || (publishWebsite && !githubConfigured) || (publishLinkedIn && !linkedIn.connected)}>
+            <button type="submit" className="publish-button" disabled={publishing || (!publishWebsite && !publishLinkedIn) || (publishWebsite && !githubConfigured) || (publishLinkedIn && (!linkedIn.connected || linkedInOverLimit))}>
               {publishing ? <LoaderCircle className="spin" size={19} /> : <Send size={18} />}{publishing ? "Publishing…" : "Publish dispatch"}
             </button>
           </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { publishFiles } from "@/lib/github";
 import { publishLinkedInPost } from "@/lib/linkedin";
+import { buildLinkedInCopy, buildPostUrl, LINKEDIN_MAX_CHARACTERS, slugify } from "@/lib/publishing";
 import { errorMessage, hasValidOrigin } from "@/lib/request";
 import { assertAdmin, getLinkedInConnection } from "@/lib/session";
 
@@ -14,16 +15,6 @@ const imageExtensions: Record<string, string> = {
 
 function text(form: FormData, key: string) {
   return String(form.get(key) || "").trim();
-}
-
-function slugify(value: string) {
-  return value
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
 }
 
 function cleanCopy(value: string) {
@@ -90,10 +81,6 @@ export async function POST(request: Request) {
     if (!publishWebsite && !publishLinkedIn) {
       return NextResponse.json({ error: "Select at least one publishing destination." }, { status: 400 });
     }
-    if (linkedInCopy.length > 3000) {
-      return NextResponse.json({ error: "LinkedIn copy must be 3,000 characters or fewer." }, { status: 400 });
-    }
-
     let imageData: { buffer: Buffer; bytes: ArrayBuffer; contentType: string; extension: string; width: number; height: number } | null = null;
     if (image instanceof File && image.size > 0) {
       const extension = imageExtensions[image.type];
@@ -106,7 +93,14 @@ export async function POST(request: Request) {
 
     const publishedAt = new Date().toISOString();
     const portfolioBase = (process.env.PORTFOLIO_URL || "").replace(/\/$/, "");
-    const postUrl = portfolioBase ? `${portfolioBase}/blog/${slug}` : "";
+    const postUrl = buildPostUrl(portfolioBase, slug);
+    const finalLinkedInCopy = buildLinkedInCopy(linkedInCopy, postUrl);
+    if (publishLinkedIn && finalLinkedInCopy.length > LINKEDIN_MAX_CHARACTERS) {
+      return NextResponse.json(
+        { error: `LinkedIn total is ${finalLinkedInCopy.length.toLocaleString("en-US")} characters including the article link. Shorten it to ${LINKEDIN_MAX_CHARACTERS.toLocaleString("en-US")} or fewer.` },
+        { status: 400 },
+      );
+    }
     const results: Record<string, { ok: boolean; detail: string; url?: string }> = {};
 
     if (publishWebsite) {
@@ -154,12 +148,10 @@ export async function POST(request: Request) {
         try {
           const connection = await getLinkedInConnection();
           if (!connection) throw new Error("Connect LinkedIn before publishing.");
-          const finalCopy = postUrl && !linkedInCopy.includes(postUrl) ? `${linkedInCopy}\n\nRead the full article: ${postUrl}` : linkedInCopy;
-          if (finalCopy.length > 3000) throw new Error("LinkedIn copy plus the article link exceeds 3,000 characters.");
           const postId = await publishLinkedInPost({
             accessToken: connection.accessToken,
             memberId: connection.memberId,
-            text: finalCopy,
+            text: finalLinkedInCopy,
             title,
             image: imageData ? { bytes: imageData.bytes, contentType: imageData.contentType } : undefined,
           });
