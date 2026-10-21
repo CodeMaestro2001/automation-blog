@@ -6,6 +6,12 @@ type GitHubFile = {
   encoding: "utf-8" | "base64";
 };
 
+export type StagedGitHubPublication = {
+  sha: string;
+  htmlUrl: string;
+  parentSha: string;
+};
+
 type GitHubResponse = { sha: string; htmlUrl: string };
 
 function githubConfig() {
@@ -39,12 +45,17 @@ async function githubFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function publishFiles(files: GitHubFile[], title: string): Promise<GitHubResponse> {
+async function branchHeadSha() {
   const { repository, branch } = githubConfig();
   const ref = await githubFetch<{ object: { sha: string } }>(
     `/repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`,
   );
-  const parentSha = ref.object.sha;
+  return ref.object.sha;
+}
+
+export async function stageFiles(files: GitHubFile[], title: string): Promise<StagedGitHubPublication> {
+  const { repository } = githubConfig();
+  const parentSha = await branchHeadSha();
   const parent = await githubFetch<{ tree: { sha: string } }>(`/repos/${repository}/git/commits/${parentSha}`);
 
   const tree = await Promise.all(
@@ -69,9 +80,32 @@ export async function publishFiles(files: GitHubFile[], title: string): Promise<
       parents: [parentSha],
     }),
   });
+  return { sha: commit.sha, htmlUrl: commit.html_url, parentSha };
+}
+
+export async function promoteStagedFiles(publication: StagedGitHubPublication): Promise<GitHubResponse> {
+  const { repository, branch } = githubConfig();
+  const currentSha = await branchHeadSha();
+  if (currentSha !== publication.parentSha) {
+    throw new Error("The portfolio branch changed while this dispatch was publishing. Nothing was promoted.");
+  }
   await githubFetch(`/repos/${repository}/git/refs/heads/${encodeURIComponent(branch)}`, {
     method: "PATCH",
-    body: JSON.stringify({ sha: commit.sha, force: false }),
+    body: JSON.stringify({ sha: publication.sha, force: false }),
   });
-  return { sha: commit.sha, htmlUrl: commit.html_url };
+  return { sha: publication.sha, htmlUrl: publication.htmlUrl };
+}
+
+export async function stagedPublicationIsLive(publication: StagedGitHubPublication) {
+  const { repository } = githubConfig();
+  const currentSha = await branchHeadSha();
+  if (currentSha === publication.sha) return true;
+  const comparison = await githubFetch<{ status: string }>(
+    `/repos/${repository}/compare/${publication.sha}...${currentSha}`,
+  );
+  return comparison.status === "ahead" || comparison.status === "identical";
+}
+
+export async function publishFiles(files: GitHubFile[], title: string): Promise<GitHubResponse> {
+  return promoteStagedFiles(await stageFiles(files, title));
 }

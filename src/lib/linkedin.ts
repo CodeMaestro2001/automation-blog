@@ -100,5 +100,13 @@ export async function publishLinkedInPost(options: {
     const detail = await response.text();
     throw new Error(`LinkedIn rejected the post (${response.status}): ${detail.slice(0, 300)}`);
   }
-  return response.headers.get("x-restli-id") || "published";
+  const postId = response.headers.get("x-restli-id");
+  if (!postId) throw new Error("LinkedIn created the post but did not return its post ID, so the transaction cannot be completed safely.");
+  return postId;
+}
+
+export async function deleteLinkedInPost(accessToken: string, postId: string) {
+  await linkedInRequest(`https://api.linkedin.com/v2/ugcPosts/${encodeURIComponent(postId)}`, accessToken, {
+    method: "DELETE",
+  });
 }

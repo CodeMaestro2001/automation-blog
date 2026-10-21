@@ -107,8 +107,8 @@ Images are limited to JPG or PNG under 4 MB so the multipart request remains wit
 - The complete editor text becomes the LinkedIn post and article content.
 - Draft text autosaves in the current browser's local storage; images are not persisted locally.
 - Each selected destination reports its own success or failure.
-- When both destinations are selected, LinkedIn is skipped if the website commit fails, preventing a broken article link from being shared.
-- If LinkedIn fails after the website succeeds, reconnect LinkedIn, disable **Portfolio blog**, and retry only LinkedIn.
+- When both destinations are selected, the portfolio commit is staged without updating the deployment branch. It is promoted only after LinkedIn succeeds.
+- If LinkedIn fails, the staged website commit is never promoted. If the final GitHub promotion fails, the LinkedIn post is deleted as a compensating rollback.
 - Secrets, OAuth tokens, and the publisher password are never sent to client-side JavaScript.
 
 ## Checks

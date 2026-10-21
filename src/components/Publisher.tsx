@@ -167,6 +167,7 @@ export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedI
   const linkedInCharactersRemaining = Math.abs(LINKEDIN_MAX_CHARACTERS - linkedInCharacterCount);
   const paragraphs = useMemo(() => article.body.split(/\n\s*\n/).filter(Boolean), [article.body]);
   const tagList = draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  const anyDestinationPublished = result ? Object.values(result.results).some((channelResult) => channelResult.ok) : false;
 
   return (
     <main className="publisher-shell">
@@ -229,7 +230,7 @@ export function Publisher({ linkedIn: initialLinkedIn, githubConfigured, linkedI
           </section>
 
           {error && <div className="notice error-notice"><XCircle size={19} /><span>{error}</span></div>}
-          {result && <div className={`notice ${result.ok ? "success-notice" : "warning-notice"}`}><CheckCircle2 size={19} /><div><strong>{result.ok ? "Published successfully" : "Published with an issue"}</strong>{Object.entries(result.results).map(([channel, channelResult]) => <p key={channel}><span>{channel}</span> — {channelResult.detail}{channelResult.url && <a href={channelResult.url} target="_blank" rel="noreferrer"> Open <ArrowUpRight size={12} /></a>}</p>)}</div></div>}
+          {result && <div className={`notice ${result.ok ? "success-notice" : "warning-notice"}`}><CheckCircle2 size={19} /><div><strong>{result.ok ? "Published successfully" : anyDestinationPublished ? "Published with an issue" : "Nothing was published"}</strong>{Object.entries(result.results).map(([channel, channelResult]) => <p key={channel}><span>{channel}</span> — {channelResult.detail}{channelResult.url && <a href={channelResult.url} target="_blank" rel="noreferrer"> Open <ArrowUpRight size={12} /></a>}</p>)}</div></div>}
 
           <div className="publish-bar">
             <button type="button" className="clear-button" onClick={clearDraft}>Clear draft</button>

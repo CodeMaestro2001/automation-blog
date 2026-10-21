@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { publishFiles } from "@/lib/github";
-import { publishLinkedInPost } from "@/lib/linkedin";
+import { promoteStagedFiles, stagedPublicationIsLive, stageFiles, type StagedGitHubPublication } from "@/lib/github";
+import { deleteLinkedInPost, publishLinkedInPost } from "@/lib/linkedin";
 import { buildLinkedInCopy, buildPostUrl, LINKEDIN_MAX_CHARACTERS, slugify } from "@/lib/publishing";
 import { errorMessage, hasValidOrigin } from "@/lib/request";
 import { assertAdmin, getLinkedInConnection } from "@/lib/session";
@@ -102,6 +102,7 @@ export async function POST(request: Request) {
       );
     }
     const results: Record<string, { ok: boolean; detail: string; url?: string }> = {};
+    let stagedWebsite: StagedGitHubPublication | null = null;
 
     if (publishWebsite) {
       try {
@@ -134,30 +135,66 @@ export async function POST(request: Request) {
               ]
             : []),
         ];
-        const commit = await publishFiles(files, title);
-        results.website = { ok: true, detail: `Committed ${commit.sha.slice(0, 7)}`, url: postUrl || commit.htmlUrl };
+        stagedWebsite = await stageFiles(files, title);
+        results.website = { ok: false, detail: "Staged and waiting for the other destination." };
       } catch (error) {
         results.website = { ok: false, detail: errorMessage(error) };
       }
     }
 
+    const connection = publishLinkedIn ? await getLinkedInConnection() : null;
+    let linkedInPostId = "";
     if (publishLinkedIn) {
-      if (publishWebsite && results.website && !results.website.ok) {
-        results.linkedin = { ok: false, detail: "Skipped because the portfolio publish failed; no broken article link was shared." };
+      if (publishWebsite && !stagedWebsite) {
+        results.linkedin = { ok: false, detail: "Skipped because the portfolio could not be staged; nothing was published." };
       } else {
         try {
-          const connection = await getLinkedInConnection();
           if (!connection) throw new Error("Connect LinkedIn before publishing.");
-          const postId = await publishLinkedInPost({
+          linkedInPostId = await publishLinkedInPost({
             accessToken: connection.accessToken,
             memberId: connection.memberId,
             text: finalLinkedInCopy,
             title,
             image: imageData ? { bytes: imageData.bytes, contentType: imageData.contentType } : undefined,
           });
-          results.linkedin = { ok: true, detail: `Post ${postId}` };
+          results.linkedin = { ok: true, detail: `Post ${linkedInPostId}`, url: `https://www.linkedin.com/feed/update/${linkedInPostId}` };
         } catch (error) {
           results.linkedin = { ok: false, detail: errorMessage(error) };
+          if (stagedWebsite) {
+            results.website = { ok: false, detail: "Not published because LinkedIn failed." };
+          }
+        }
+      }
+    }
+
+    if (stagedWebsite && (!publishLinkedIn || linkedInPostId)) {
+      try {
+        const commit = await promoteStagedFiles(stagedWebsite);
+        results.website = { ok: true, detail: `Committed ${commit.sha.slice(0, 7)}`, url: postUrl || commit.htmlUrl };
+      } catch (promotionError) {
+        let promotionSucceeded = false;
+        try {
+          promotionSucceeded = await stagedPublicationIsLive(stagedWebsite);
+        } catch {
+          // Keep the original promotion error; rollback below is the safest recoverable action.
+        }
+
+        if (promotionSucceeded) {
+          results.website = { ok: true, detail: `Committed ${stagedWebsite.sha.slice(0, 7)}`, url: postUrl || stagedWebsite.htmlUrl };
+        } else {
+          results.website = { ok: false, detail: errorMessage(promotionError) };
+          if (publishLinkedIn && linkedInPostId && connection) {
+            try {
+              await deleteLinkedInPost(connection.accessToken, linkedInPostId);
+              results.linkedin = { ok: false, detail: "Rolled back because the portfolio publish failed; nothing remains published." };
+            } catch (rollbackError) {
+              results.linkedin = {
+                ok: true,
+                detail: `URGENT: portfolio publishing failed and LinkedIn rollback also failed (${errorMessage(rollbackError)}). Delete post ${linkedInPostId} manually.`,
+                url: `https://www.linkedin.com/feed/update/${linkedInPostId}`,
+              };
+            }
+          }
         }
       }
     }
